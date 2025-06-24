@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+service SentimentAnalyzer {
+  rpc Analyze (SentimentRequest) returns (SentimentResponse);
+}
+
+message SentimentRequest {
+  string text = 1;
+}
+
+message SentimentResponse {
+  string sentiment = 1; // positive, negative, neutral
+}

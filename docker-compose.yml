@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - app-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.0.1
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: sentiment
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "admin"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  grpc_service:
+    build:
+      context: .
+      dockerfile: grpc_service/Dockerfile
+    volumes:
+      - ./config.py:/app/config.py
+      - ./.env:/app/.env
+    networks:
+      - app-network
+    depends_on:
+      - redis
+
+  producer:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    volumes:
+      - ./config.py:/app/config.py
+      - ./.env:/app/.env
+    depends_on:
+      kafka:
+        condition: service_started
+    networks:
+      - app-network
+    restart: always
+
+  consumer:
+    build:
+      context: .
+      dockerfile: consumer/Dockerfile
+    volumes:
+      - ./config.py:/app/config.py
+      - ./.env:/app/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      grpc_service:
+        condition: service_started
+      redis:
+        condition: service_started
+    networks:
+      - app-network
+    restart: always
+
+  rest_api:
+    build:
+      context: .
+      dockerfile: rest_api/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.py:/app/config.py
+      - ./.env:/app/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
